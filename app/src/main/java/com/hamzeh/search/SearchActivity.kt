@@ -7,11 +7,15 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+
 class SearchActivity: AppCompatActivity() {
 
-    private val handler = Handler(Looper.getMainLooper())
-    private val delayMillis = 500L
-    private var lastUpdateTime = 0L
+    private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val searchQueryState = MutableStateFlow("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,25 +26,25 @@ class SearchActivity: AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {}
 
             override fun onTextChanged(s: CharSequence, start: Int, before: Int, count: Int) {
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime > delayMillis) {
-                    lastUpdateTime = currentTime
-                    requestSearchSuggestions(s.toString())
-                } else {
-                    handler.removeCallbacksAndMessages(null)
-                    handler.postDelayed({
-                        requestSearchSuggestions(s.toString())
-                    }, delayMillis)
-                }
+                searchQueryState.value = s.toString()
             }
 
             override fun afterTextChanged(s: Editable) {}
         })
+
+        coroutineScope.launch {
+            searchQueryState
+                .debounce(500) // Debounce for 500 milliseconds
+                .distinctUntilChanged() // Only emit distinct values
+                .collect { query ->
+                    requestSearchSuggestions(query)
+                }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        handler.removeCallbacksAndMessages(null)
+        coroutineScope.cancel()
     }
 
     private fun requestSearchSuggestions(query: String) {
